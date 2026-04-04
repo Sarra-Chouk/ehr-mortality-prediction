@@ -1,0 +1,13 @@
+imbalanced-learn
+ipython
+joblib
+matplotlib
+numpy
+pandas
+plotly
+psutil
+pyarrow
+scikit-learn>=1.6
+shap
+tabicl
+xgboost

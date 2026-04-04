@@ -1,0 +1,17 @@
+{
+    "model_file": "xgb_end_to_end_batch_model.joblib",
+    "threshold": 0.07,
+    "best_params": {
+        "colsample_bytree": 0.8,
+        "gamma": 0,
+        "learning_rate": 0.05,
+        "max_depth": 8,
+        "min_child_weight": 5,
+        "n_estimators": 200,
+        "subsample": 1.0
+    },
+    "calibration_method": "sigmoid",
+    "expected_model_input_columns_file": "expected_model_input_columns.json",
+    "prediction_probability_column": "predicted_probability",
+    "prediction_label_column": "predicted_label"
+}
