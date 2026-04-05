@@ -1,3 +1,5 @@
+"""Create patient-grouped train, test, and deployment splits for model evaluation."""
+
 import argparse
 import json
 from pathlib import Path
@@ -33,6 +35,7 @@ def validate_split_integrity(
     test_ids: set,
     deployment_ids: set,
 ) -> None:
+    """Validate that grouped splits are exhaustive, mutually exclusive, and row-safe."""
     if train_ids & test_ids:
         raise ValueError("Overlap detected between train and test patient IDs.")
     if train_ids & deployment_ids:
@@ -67,6 +70,7 @@ def validate_split_integrity(
 
 
 def get_numeric_feature_columns(df: pd.DataFrame, target_col: str, reference_cols: list[str]) -> list[str]:
+    """Return numeric feature columns eligible for post-split imputation."""
     exclude_cols = set(reference_cols + [target_col, "_original_order"])
     return [
         col for col in df.columns
@@ -117,6 +121,7 @@ def save_split_files(
     target_col: str,
     reference_cols: list[str],
 ) -> None:
+    """Write feature-only, target-only, and full-row versions of one split to disk."""
     feature_drop_cols = [target_col, *[col for col in reference_cols if col in split_df.columns]]
     X_split = split_df.drop(columns=feature_drop_cols, errors="ignore")
     y_split = split_df[[target_col]]
@@ -368,6 +373,7 @@ def split_data(
 
 
 def parse_args() -> argparse.Namespace:
+    """Parse command-line arguments for grouped split generation."""
     parser = argparse.ArgumentParser(description="Create grouped raw and imputed train/test/deployment splits.")
     parser.add_argument(
         "--input-path",
@@ -393,7 +399,8 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-if __name__ == "__main__":
+def main() -> None:
+    """Run grouped split generation from the command line."""
     args = parse_args()
     split_data(
         input_path=str(args.input_path),
@@ -403,3 +410,7 @@ if __name__ == "__main__":
         group_col=args.group_col,
         random_state=args.random_state,
     )
+
+
+if __name__ == "__main__":
+    main()

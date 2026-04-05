@@ -1,17 +1,24 @@
 {
     "model_file": "xgb_end_to_end_batch_model.joblib",
-    "threshold": 0.07,
+    "packaged_object_type": "EHRMortalityEndToEndPipeline",
+    "threshold": 0.84,
     "best_params": {
-        "colsample_bytree": 0.8,
+        "subsample": 0.7,
+        "reg_lambda": 10,
+        "reg_alpha": 1,
+        "n_estimators": 300,
+        "min_child_weight": 1,
+        "max_depth": 5,
+        "max_delta_step": 3,
+        "learning_rate": 0.07,
         "gamma": 0,
-        "learning_rate": 0.05,
-        "max_depth": 8,
-        "min_child_weight": 5,
-        "n_estimators": 200,
-        "subsample": 1.0
+        "colsample_bytree": 0.6
     },
-    "calibration_method": "sigmoid",
+    "calibration_method": "none",
     "expected_model_input_columns_file": "expected_model_input_columns.json",
     "prediction_probability_column": "predicted_probability",
-    "prediction_label_column": "predicted_label"
+    "prediction_label_column": "predicted_label",
+    "model_name": "XGBoost_random_search_calibrated_thresholded",
+    "scale_pos_weight": 44.95821980018165,
+    "source_artifacts_dir": "artifacts/xgboost"
 }

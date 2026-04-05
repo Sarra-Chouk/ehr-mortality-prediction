@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+"""Build the encounter-level master feature table from raw MIMIC source tables."""
+
 import argparse
 import gc
 import re
@@ -57,10 +59,12 @@ ICU_REGEX = "|".join(re.escape(k) for k in ICU_KEYWORDS)
 
 
 def log(message: str) -> None:
+    """Print progress messages immediately for long-running feature builds."""
     print(message, flush=True)
 
 
 def safe_read_csv(path: Path, **kwargs) -> pd.DataFrame:
+    """Read a CSV file with a consistent missing-file check."""
     if not path.exists():
         raise FileNotFoundError(f"Missing file: {path}")
     return pd.read_csv(path, low_memory=False, **kwargs)
@@ -73,6 +77,7 @@ def read_csv_chunks(
     dtype: dict[str, Any] | None = None,
     chunksize: int = DEFAULT_CHUNKSIZE,
 ) -> pd.io.parsers.TextFileReader:
+    """Stream a large CSV file in chunks with consistent defaults."""
     if not path.exists():
         raise FileNotFoundError(f"Missing file: {path}")
     return pd.read_csv(
@@ -85,6 +90,7 @@ def read_csv_chunks(
 
 
 def to_datetime(df: pd.DataFrame, cols: list[str]) -> pd.DataFrame:
+    """Parse selected dataframe columns as datetimes in place."""
     for col in cols:
         if col in df.columns:
             df[col] = pd.to_datetime(df[col], errors="coerce")
@@ -92,6 +98,7 @@ def to_datetime(df: pd.DataFrame, cols: list[str]) -> pd.DataFrame:
 
 
 def normalize_text_series(s: pd.Series) -> pd.Series:
+    """Lowercase and strip free-text values while preserving missingness."""
     return (
         s.astype("string")
         .str.strip()
@@ -101,24 +108,28 @@ def normalize_text_series(s: pd.Series) -> pd.Series:
 
 
 def normalize_category_value(val: Any) -> Any:
+    """Normalize one categorical value to a lowercased comparable form."""
     if pd.isna(val):
         return pd.NA
     return str(val).strip().lower()
 
 
 def round_to_int_or_nan(value: Any) -> float:
+    """Round a numeric value to the nearest integer while preserving nulls."""
     if pd.isna(value):
         return np.nan
     return int(round(float(value)))
 
 
 def round_to_2_or_nan(value: Any) -> float:
+    """Round a numeric value to two decimals while preserving nulls."""
     if pd.isna(value):
         return np.nan
     return round(float(value), 2)
 
 
 def map_gender(val: Any) -> Any:
+    """Map raw gender codes to the binary encoding used in the project."""
     val = normalize_category_value(val)
     if val == "m":
         return 1
@@ -128,6 +139,7 @@ def map_gender(val: Any) -> Any:
 
 
 def clean_admission_type(val: Any) -> Any:
+    """Collapse raw admission types into the project-level categories."""
     val = normalize_category_value(val)
     if pd.isna(val):
         return pd.NA
@@ -141,6 +153,7 @@ def clean_admission_type(val: Any) -> Any:
 
 
 def clean_marital_status(val: Any) -> Any:
+    """Collapse raw marital-status values into a stable small vocabulary."""
     val = normalize_category_value(val)
     if pd.isna(val):
         return pd.NA
@@ -156,6 +169,7 @@ def clean_marital_status(val: Any) -> Any:
 
 
 def clean_race(val: Any) -> Any:
+    """Collapse raw race labels into the project-level race groups."""
     val = normalize_category_value(val)
     if pd.isna(val):
         return pd.NA
@@ -171,6 +185,7 @@ def clean_race(val: Any) -> Any:
 
 
 def parse_bp_string(value: Any) -> tuple[float, float]:
+    """Parse a blood-pressure string like 120/80 into numeric components."""
     if pd.isna(value):
         return np.nan, np.nan
 
@@ -183,6 +198,7 @@ def parse_bp_string(value: Any) -> tuple[float, float]:
 
 
 def first_valid_time_cols(df: pd.DataFrame, candidates: list[str]) -> pd.Series:
+    """Return the first non-missing timestamp across a prioritized column list."""
     result = pd.Series(pd.NaT, index=df.index, dtype="datetime64[ns]")
     for col in candidates:
         if col in df.columns:
@@ -191,6 +207,7 @@ def first_valid_time_cols(df: pd.DataFrame, candidates: list[str]) -> pd.Series:
 
 
 def load_subject_filter() -> set[int] | None:
+    """Load the optional demo subject filter if the repo provides one."""
     path = DATA_DIR / "demo_subject_id.csv"
     if not path.exists():
         return None
@@ -199,22 +216,26 @@ def load_subject_filter() -> set[int] | None:
 
 
 def filter_subjects(df: pd.DataFrame, subject_ids: set[int] | None) -> pd.DataFrame:
+    """Restrict a dataframe to a predefined subject subset when requested."""
     if subject_ids is None or "subject_id" not in df.columns:
         return df
     return df[df["subject_id"].isin(subject_ids)]
 
 
 def compute_subject_bucket(series: pd.Series, num_buckets: int) -> pd.Series:
+    """Assign each subject to a deterministic bucket for staged processing."""
     return (series.astype("int64") % num_buckets).astype("int16")
 
 
 def reset_dir(path: Path) -> None:
+    """Recreate a staging directory from scratch."""
     if path.exists():
         shutil.rmtree(path)
     path.mkdir(parents=True, exist_ok=True)
 
 
 def write_partitioned_chunk(df: pd.DataFrame, dataset_dir: Path) -> None:
+    """Append one reduced chunk to a bucket-partitioned parquet dataset."""
     if df.empty:
         return
     table = pa.Table.from_pandas(df, preserve_index=False)
@@ -227,6 +248,7 @@ def write_partitioned_chunk(df: pd.DataFrame, dataset_dir: Path) -> None:
 
 
 def read_bucket_dataset(dataset_dir: Path, bucket: int) -> pd.DataFrame:
+    """Read one subject bucket back from a staged parquet dataset."""
     if not dataset_dir.exists():
         return pd.DataFrame()
     try:
@@ -236,12 +258,14 @@ def read_bucket_dataset(dataset_dir: Path, bucket: int) -> pd.DataFrame:
 
 
 def release_memory(*objs: Any) -> None:
+    """Drop temporary objects and trigger garbage collection."""
     for obj in objs:
         del obj
     gc.collect()
 
 
 def load_core_tables() -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Load and normalize the core admissions and patients tables."""
     subject_filter = load_subject_filter()
 
     log("Stage A: loading core visit tables (admissions, patients)")
@@ -286,6 +310,7 @@ def load_core_tables() -> tuple[pd.DataFrame, pd.DataFrame]:
 
 
 def build_base_visits(admissions: pd.DataFrame, patients: pd.DataFrame, num_buckets: int) -> pd.DataFrame:
+    """Create the admission-level base table before joining historical features."""
     patient_cols = ["subject_id", "gender", "anchor_age", "anchor_year"]
     visits = admissions.merge(
         patients[patient_cols].drop_duplicates(subset=["subject_id"]),
@@ -362,6 +387,7 @@ def build_base_visits(admissions: pd.DataFrame, patients: pd.DataFrame, num_buck
 
 
 def build_hadm_to_times(admissions: pd.DataFrame) -> pd.DataFrame:
+    """Build an admission-time lookup table used by downstream feature logic."""
     cols = ["subject_id", "hadm_id", "admittime", "dischtime", "edregtime", "edouttime"]
     hadm_times = admissions[cols].drop_duplicates(subset=["hadm_id"]).copy()
     hadm_times["los_days"] = (
@@ -385,6 +411,7 @@ def stage_table_chunks(
     num_buckets: int,
     chunksize: int,
 ) -> Path:
+    """Reduce one large raw table into a bucketed parquet staging dataset."""
     dataset_dir = STAGING_DIR / name
     reset_dir(dataset_dir)
     log(f"Stage C: processing {name}")
@@ -421,6 +448,7 @@ def transform_diagnoses_chunk(
     hadm_ids: set[int],
     num_buckets: int,
 ) -> pd.DataFrame:
+    """Filter and standardize one diagnoses chunk for staged feature building."""
     chunk = chunk[chunk["subject_id"].isin(subject_ids) & chunk["hadm_id"].isin(hadm_ids)]
     chunk = chunk.dropna(subset=["subject_id", "hadm_id"])
     if chunk.empty:
@@ -437,6 +465,7 @@ def transform_procedures_chunk(
     hadm_ids: set[int],
     num_buckets: int,
 ) -> pd.DataFrame:
+    """Filter and standardize one procedures chunk for staged feature building."""
     chunk = chunk[chunk["subject_id"].isin(subject_ids) & chunk["hadm_id"].isin(hadm_ids)]
     chunk = chunk.dropna(subset=["subject_id", "hadm_id"])
     if chunk.empty:
@@ -453,6 +482,7 @@ def transform_drgcodes_chunk(
     hadm_ids: set[int],
     num_buckets: int,
 ) -> pd.DataFrame:
+    """Filter and standardize one DRG chunk for staged feature building."""
     chunk = chunk[chunk["subject_id"].isin(subject_ids) & chunk["hadm_id"].isin(hadm_ids)]
     chunk = chunk.dropna(subset=["subject_id", "hadm_id"])
     if chunk.empty:
@@ -470,6 +500,7 @@ def transform_labevents_chunk(
     hadm_ids: set[int],
     num_buckets: int,
 ) -> pd.DataFrame:
+    """Filter and summarize one lab-events chunk into model-friendly columns."""
     chunk = chunk[chunk["subject_id"].isin(subject_ids)]
     if chunk.empty:
         return chunk
@@ -511,6 +542,7 @@ def transform_microbiology_chunk(
     hadm_ids: set[int],
     num_buckets: int,
 ) -> pd.DataFrame:
+    """Filter and standardize one microbiology chunk for historical infection features."""
     chunk = chunk[chunk["subject_id"].isin(subject_ids)]
     if chunk.empty:
         return chunk
@@ -535,6 +567,7 @@ def transform_omr_chunk(
     hadm_ids: set[int],
     num_buckets: int,
 ) -> pd.DataFrame:
+    """Filter and standardize one outpatient-measurements chunk."""
     chunk = chunk[chunk["subject_id"].isin(subject_ids)]
     if chunk.empty:
         return chunk
@@ -557,6 +590,7 @@ def transform_pharmacy_chunk(
     hadm_ids: set[int],
     num_buckets: int,
 ) -> pd.DataFrame:
+    """Filter and standardize one pharmacy chunk for medication-history features."""
     chunk = chunk[chunk["subject_id"].isin(subject_ids) & chunk["hadm_id"].isin(hadm_ids)]
     chunk = chunk.dropna(subset=["subject_id", "hadm_id"])
     if chunk.empty:
@@ -579,6 +613,7 @@ def transform_prescriptions_chunk(
     hadm_ids: set[int],
     num_buckets: int,
 ) -> pd.DataFrame:
+    """Filter and standardize one prescriptions chunk for medication-history features."""
     chunk = chunk[chunk["subject_id"].isin(subject_ids) & chunk["hadm_id"].isin(hadm_ids)]
     chunk = chunk.dropna(subset=["subject_id", "hadm_id"])
     if chunk.empty:
@@ -601,6 +636,7 @@ def transform_transfers_chunk(
     hadm_ids: set[int],
     num_buckets: int,
 ) -> pd.DataFrame:
+    """Filter and standardize one transfers chunk for prior-acuity features."""
     chunk = chunk[chunk["subject_id"].isin(subject_ids)]
     if chunk.empty:
         return chunk
@@ -619,6 +655,7 @@ def transform_transfers_chunk(
 
 
 def stage_reduced_tables(subject_ids: set[int], hadm_ids: set[int], num_buckets: int, chunksize: int) -> dict[str, Path]:
+    """Stage all secondary raw tables as reduced bucketed parquet datasets."""
     reset_dir(STAGING_DIR)
 
     datasets = {
@@ -754,6 +791,7 @@ def stage_reduced_tables(subject_ids: set[int], hadm_ids: set[int], num_buckets:
 
 
 def get_subject_frame(groups: dict[int, pd.DataFrame], subject_id: int, columns: list[str]) -> pd.DataFrame:
+    """Return one subject's staged rows or an empty frame with the expected columns."""
     frame = groups.get(subject_id)
     if frame is None:
         return pd.DataFrame(columns=columns)
@@ -761,6 +799,7 @@ def get_subject_frame(groups: dict[int, pd.DataFrame], subject_id: int, columns:
 
 
 def group_bucket_by_subject(df: pd.DataFrame, sort_cols: list[str] | None = None) -> dict[int, pd.DataFrame]:
+    """Group one bucketed dataset into per-subject dataframes for fast lookup."""
     if df.empty:
         return {}
     if sort_cols is not None:
@@ -782,6 +821,7 @@ def build_feature_row(
     transfers: pd.DataFrame,
     omr: pd.DataFrame,
 ) -> dict[str, Any]:
+    """Build the full leakage-safe feature row for one admission."""
     admittime = row["admittime"]
 
     prev_visits = patient_visits[patient_visits["admittime"] < admittime]
@@ -887,6 +927,7 @@ def build_feature_row(
 
 
 def validate_master_table(master: pd.DataFrame) -> None:
+    """Validate the final master table before saving it for downstream use."""
     if master.empty:
         raise ValueError("Master table is empty.")
 
@@ -909,6 +950,7 @@ def validate_master_table(master: pd.DataFrame) -> None:
 
 
 def finalize_master_table(master: pd.DataFrame) -> pd.DataFrame:
+    """Apply final null handling, rounding, and column ordering to the master table."""
     zero_fill_cols = [
         "time_since_last_visit_days",
         "avg_time_between_visits_days",
@@ -977,6 +1019,7 @@ def finalize_master_table(master: pd.DataFrame) -> pd.DataFrame:
 
 
 def build_master_table(num_buckets: int = DEFAULT_NUM_BUCKETS, chunksize: int = DEFAULT_CHUNKSIZE) -> pd.DataFrame:
+    """Run the full raw-data feature pipeline and return the master table."""
     admissions, patients = load_core_tables()
     visits = build_base_visits(admissions, patients, num_buckets=num_buckets)
     hadm_times = build_hadm_to_times(admissions)
@@ -1086,6 +1129,7 @@ def build_master_table(num_buckets: int = DEFAULT_NUM_BUCKETS, chunksize: int = 
 
 
 def parse_args() -> argparse.Namespace:
+    """Parse command-line arguments for master-table generation."""
     parser = argparse.ArgumentParser(description="Build leakage-safe master table for mortality prediction.")
     parser.add_argument("--save-csv", action="store_true", help="Save CSV output")
     parser.add_argument("--save-parquet", action="store_true", help="Save Parquet output")
@@ -1095,6 +1139,7 @@ def parse_args() -> argparse.Namespace:
 
 
 def main() -> None:
+    """Run the master-table build pipeline from the command line."""
     args = parse_args()
 
     save_csv = args.save_csv or (not args.save_csv and not args.save_parquet)

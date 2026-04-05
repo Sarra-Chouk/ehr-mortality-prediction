@@ -1,47 +1,90 @@
 # EHR Mortality Prediction
 
-This project develops an end-to-end machine learning pipeline for predicting patient mortality risk from structured electronic health record data. It combines hospital and ICU source tables into a single encounter-level feature set, prepares a stable model-ready dataset, trains and calibrates predictive models, and produces outputs that can support downstream scoring and dashboarding workflows.
+This repository contains an end-to-end clinical machine learning workflow for predicting **in-hospital mortality risk** from structured electronic health record data. The project turns raw MIMIC-IV hospital data into an encounter-level feature table, evaluates multiple predictive modeling strategies, analyzes model behavior with explainability and fairness workflows, and packages the selected model for deployment-oriented scoring.
 
-The core objective is to estimate mortality risk from routinely collected clinical and operational variables. The feature engineering pipeline brings together demographic information, admission context, prior utilization patterns, diagnosis and procedure history, medication burden, transfer and ICU history, infection-related signals, laboratory summaries, and recent vital-sign features. The result is a standardized dataset designed for both experimentation and deployment.
+## Project Overview
 
-## Project Scope
+| Area | Summary |
+| --- | --- |
+| **Business Problem** | Identify patients at elevated mortality risk early enough to support downstream monitoring, prioritization, and clinical decision support workflows. |
+| **Objectives** | Build a leakage-aware mortality prediction pipeline, compare candidate models, select a production-ready approach, and generate interpretable outputs for deployment and dashboarding. |
+| **Dataset** | Structured **MIMIC-IV** hospital and ICU data consolidated into an encounter-level master table with **546,028 rows** and **46 engineered columns**. |
+| **Final Deployment Asset** | A packaged XGBoost-based inference pipeline with saved schema, metadata, threshold, and dashboard-ready scoring outputs. |
 
-The repository covers the full modeling lifecycle:
+## Dataset
 
-- ingestion and consolidation of raw EHR tables into a master analytical table
-- preprocessing, schema validation, categorical encoding, and model-ready dataset generation
-- patient-level train, test, and deployment splits with leakage-aware temporal imputation
-- baseline and advanced model experimentation in notebooks
-- calibrated XGBoost model packaging for batch inference
-- prediction export for deployment and dashboard-ready reporting
-- explainability and bias analysis artifacts for model interpretation
+The project uses de-identified **MIMIC-IV** EHR data, primarily from the hospital and ICU domains. Raw source tables are consolidated into a master analytical table where each row represents a hospital admission. The engineered feature set combines:
 
-## Modeling Approach
+- demographics and admission context
+- emergency department timing and entry pattern
+- prior utilization and length-of-stay history
+- diagnosis and procedure burden
+- DRG severity and mortality indicators
+- laboratory abnormality summaries
+- medication exposure history
+- transfer, ICU, infection, and resistance history
+- recent OMR and vital-sign derived features
 
-The production-oriented modeling workflow centers on a calibrated XGBoost classifier. The project includes utilities to train the model, estimate class imbalance weights, calibrate predicted probabilities, and package the final model together with its expected input schema and metadata. This supports more reliable risk scoring and reproducible downstream use.
+The final processed data is split at the **patient level** into train, test, and deployment partitions to prevent cross-split leakage:
 
-Alongside the packaged model workflow, the notebooks document broader experimentation across multiple approaches, including traditional baseline models, neural network modeling, explainability analysis with SHAP, subgroup bias analysis, and comparison against alternative tabular modeling strategies.
+- **Train:** 380,461 rows
+- **Test:** 83,356 rows
+- **Deployment:** 82,211 rows
+
+## Analytical Workflow
+
+### 1. Feature Engineering
+
+Raw MIMIC-IV hospital tables are consolidated into an admission-level master table through a leakage-aware feature engineering pipeline. This stage derives historical and encounter-level predictors from diagnoses, procedures, DRG codes, laboratory events, prescriptions, transfers, microbiology records, and outpatient measurements. The resulting feature space captures both current admission context and prior patient history.
+
+### 2. Data Preprocessing
+
+The engineered master table is validated against an expected schema and transformed into a stable model-ready dataset. This stage standardizes missing values, enforces data types, handles categorical levels, applies one-hot encoding, and preserves a consistent feature schema for training and deployment. Patient-level train, test, and deployment splits are then created to avoid cross-patient leakage, with a separate imputed split path for models that do not support missing values natively.
+
+### 3. Exploratory Data Analysis
+
+EDA was used to profile class imbalance, missingness, feature distributions, subgroup differences, and clinically relevant relationships before modeling. The notebooks cover both summary-level inspection and visual analysis of demographic, operational, laboratory, medication, ICU, and infection-related signals.
+
+### 4. Predictive Modeling Experiments
+
+The modeling workflow compares multiple approaches for an imbalanced binary classification problem. Experiments include:
+
+- baseline machine learning models such as Logistic Regression, Decision Tree, Random Forest, Gradient Boosting, KNN, Naive Bayes, XGBoost, and LightGBM
+- class-imbalance handling through weighting and threshold tuning
+- SMOTETomek-based resampling experiments
+- random-search XGBoost model selection using validation **PR-AUC** and **ROC-AUC**
+- additional neural-network and tabular-model experiments, including **MLP** and **TabICLv2**
+
+The selected production model is the saved **XGBoost** artifact under [`artifacts/xgboost/`](artifacts/xgboost), which is reused for packaging and deployment scoring.
+
+### 5. SHAP Explainability
+
+The repository includes SHAP-based explainability analysis for the final XGBoost model. This includes:
+
+- global feature-importance views
+- distributional SHAP plots across the test set
+- local case-level explanations for representative predictions
+
+This layer is intended to make the model behavior more interpretable and defensible beyond raw performance metrics alone.
+
+### 6. Bias Analysis
+
+Model behavior is also evaluated across key demographic subgroups to surface performance disparities. The bias-analysis workflow reports subgroup metrics across:
+
+- gender
+- age group
+- race group
+
+This supports a more complete assessment of deployment risk by examining fairness gaps in recall, precision, F1, ROC-AUC, and PR-AUC rather than relying only on aggregate performance.
 
 ## Repository Structure
 
-- `src/data/`: data assembly, feature engineering, preprocessing, and split generation
-- `src/models/`: model packaging and dashboard-oriented prediction utilities
-- `deployment/`: batch scoring script and packaged model outputs
-- `notebooks/`: exploratory analysis, model development, explainability, and fairness analysis
-- `artifacts/`: generated model artifacts and analytical outputs
-
-## Outputs
-
-The project produces several deployment- and analysis-oriented outputs:
-
-- a master feature table derived from raw EHR sources
-- a validated model-ready dataset with a stable schema
-- train, test, and deployment data partitions
-- packaged model files and prediction metadata
-- scored prediction files for deployment use
-- dashboard-ready prediction tables
-- explainability visualizations and fairness assessment outputs
+- [`src/data/`](src/data): raw-table feature engineering, preprocessing, and split generation
+- [`src/models/`](src/models): final model-specific logic for the selected XGBoost approach
+- [`src/deployment/`](src/deployment): packaged inference pipeline and dashboard table generation
+- [`deployment/`](deployment): deployment scoring script and packaged model files
+- [`notebooks/`](notebooks): EDA, modeling experiments, SHAP explainability, and bias analysis
 
 ## Summary
 
-This repository is an applied clinical machine learning project focused on transforming raw EHR data into an interpretable and deployment-ready mortality risk prediction pipeline. It is structured to support data preparation, model development, evaluation, packaging, and analytical reporting within a single codebase.
+This project is an applied mortality-risk modeling pipeline built around structured EHR data, leakage-aware feature engineering, comparative model evaluation, and deployment-oriented inference. It is designed to support both technical experimentation and practical scoring workflows while maintaining interpretability through SHAP analysis and fairness checks across key patient subgroups.

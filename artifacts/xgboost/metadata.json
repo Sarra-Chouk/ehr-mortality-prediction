@@ -1,0 +1,33 @@
+{
+    "model_name": "XGBoost_random_search_calibrated_thresholded",
+    "best_params": {
+        "subsample": 0.7,
+        "reg_lambda": 10,
+        "reg_alpha": 1,
+        "n_estimators": 300,
+        "min_child_weight": 1,
+        "max_depth": 5,
+        "max_delta_step": 3,
+        "learning_rate": 0.07,
+        "gamma": 0,
+        "colsample_bytree": 0.6
+    },
+    "best_calibration_method": "none",
+    "best_threshold": 0.84,
+    "scale_pos_weight": 44.95821980018165,
+    "base_model_selection_metric_order": [
+        "val_pr_auc",
+        "val_roc_auc"
+    ],
+    "calibration_selection_metric_order": [
+        "val_pr_auc",
+        "val_roc_auc"
+    ],
+    "threshold_selection_metric_order": [
+        "f1",
+        "recall",
+        "precision"
+    ],
+    "n_iter_search": 30,
+    "artifacts_saved_in": "../artifacts/xgboost"
+}
