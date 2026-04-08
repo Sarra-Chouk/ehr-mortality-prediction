@@ -38,14 +38,7 @@
     "last_systolic",
     "last_diastolic",
     "last_pulse_pressure",
-    "admission_type_urgent",
-    "admission_type_other",
-    "marital_status_single",
-    "marital_status_divorced",
-    "marital_status_widowed",
-    "marital_status_unknown",
-    "race_black",
-    "race_asian",
-    "race_hispanic_latino",
-    "race_other"
+    "admission_type",
+    "marital_status",
+    "race"
 ]

@@ -1,5 +1,1 @@
-"""Deployment helpers and packaged inference pipeline."""
-
-from .pipeline import EHRMortalityEndToEndPipeline, save_packaged_model
-
-__all__ = ["EHRMortalityEndToEndPipeline", "save_packaged_model"]
+"""Deployment package for schema validation, inference, and dashboard formatting."""

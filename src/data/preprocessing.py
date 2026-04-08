@@ -96,6 +96,12 @@ MODEL_BASE_COLUMNS = [
     ],
 ]
 
+MODEL_INPUT_FEATURE_COLUMNS = [
+    col for col in EXPECTED_MASTER_COLUMNS
+    if col not in set(REFERENCE_COLS + [TARGET_COL])
+]
+MODEL_INPUT_COLUMNS = [*REFERENCE_COLS, *MODEL_INPUT_FEATURE_COLUMNS, TARGET_COL]
+
 
 def log(message: str) -> None:
     """Print progress messages immediately for long-running preprocessing jobs."""
@@ -187,9 +193,7 @@ def validate_and_cast_master_batch(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def handle_missing_data(df: pd.DataFrame) -> pd.DataFrame:
-    """Fill categorical missing values with the explicit unknown bucket."""
-    for col in CATEGORICAL_COLS:
-        df[col] = df[col].fillna("unknown")
+    """Apply deterministic missing-value handling that stays outside sklearn."""
     return df
 
 
@@ -224,53 +228,44 @@ def infer_category_levels(input_path: Path, batch_size: int) -> dict[str, list[s
 
 
 def get_expected_model_columns(category_levels: dict[str, list[str]]) -> list[str]:
-    """Construct the stable column order expected by training and deployment."""
-    encoded_cols = [
-        f"{col}_{level}"
-        for col in CATEGORICAL_COLS
-        for level in category_levels[col][1:]
-    ]
-    return [*MODEL_BASE_COLUMNS, *encoded_cols, TARGET_COL]
+    """Construct the stable pre-encoded model-input column order."""
+    _ = category_levels
+    return MODEL_INPUT_COLUMNS
 
 
 def apply_category_dtypes(df: pd.DataFrame, category_levels: dict[str, list[str]]) -> pd.DataFrame:
-    """Apply fixed categorical dtypes before one-hot encoding."""
+    """Apply validated categorical dtypes while preserving raw category columns."""
     for col in CATEGORICAL_COLS:
         df[col] = df[col].astype(CategoricalDtype(categories=category_levels[col], ordered=True))
     return df
 
 
 def build_model_input_batch(master: pd.DataFrame, expected_model_columns: list[str]) -> pd.DataFrame:
-    """One-hot encode one batch of master-table rows into model input columns."""
-    model_df = master.copy()
+    """Build the deterministic pre-encoded model-input batch for downstream pipelines."""
+    model_df = master.reindex(columns=expected_model_columns).copy()
 
-    model_df = pd.get_dummies(
-        model_df,
-        columns=CATEGORICAL_COLS,
-        drop_first=True,
-        dtype="int8",
-    )
-    model_df = model_df.reindex(columns=expected_model_columns, fill_value=0)
+    for col in CATEGORICAL_COLS:
+        model_df[col] = model_df[col].astype("string")
     model_df["age"] = model_df["age"].astype("int32")
     model_df["gender"] = model_df["gender"].astype("int8")
     model_df[TARGET_COL] = model_df[TARGET_COL].astype("int8")
-
     return model_df
 
 
 def validate_model_batch(df: pd.DataFrame, expected_model_columns: list[str]) -> None:
-    """Ensure an encoded batch is numeric, ordered, and target-safe."""
-    object_cols = df.select_dtypes(include=["object"]).columns.tolist()
-    string_cols = df.select_dtypes(include=["string"]).columns.tolist()
-    category_cols = df.select_dtypes(include=["category"]).columns.tolist()
-    if object_cols or string_cols or category_cols:
-        raise ValueError(
-            "Non-numeric columns remain after encoding: "
-            f"{object_cols + string_cols + category_cols}"
-        )
-
+    """Ensure the pre-encoded model input batch matches the expected schema."""
     if df.columns.tolist() != expected_model_columns:
         raise ValueError("Model-ready columns do not match the expected stable schema.")
+
+    invalid_string_cols = [
+        col for col in df.select_dtypes(include=["object", "string", "category"]).columns
+        if col not in CATEGORICAL_COLS
+    ]
+    if invalid_string_cols:
+        raise ValueError(
+            "Unexpected non-numeric columns remain in model input: "
+            f"{invalid_string_cols}"
+        )
 
     if not set(df[TARGET_COL].dropna().astype(int).unique()).issubset({0, 1}):
         raise ValueError("target must remain binary {0,1} after preprocessing.")
@@ -336,14 +331,16 @@ def write_model_batch(
     parquet_writer: pq.ParquetWriter | None,
     *,
     csv_header: bool,
+    output_parquet_path: Path,
+    output_csv_path: Path,
 ) -> tuple[pq.ParquetWriter, bool]:
     """Append one encoded batch to the model-ready parquet and CSV outputs."""
     table = pa.Table.from_pandas(model_df, preserve_index=False)
     if parquet_writer is None:
-        parquet_writer = pq.ParquetWriter(MODEL_READY_PARQUET, table.schema)
+        parquet_writer = pq.ParquetWriter(output_parquet_path, table.schema)
     parquet_writer.write_table(table)
 
-    model_df.to_csv(MODEL_READY_CSV, mode="w" if csv_header else "a", header=csv_header, index=False)
+    model_df.to_csv(output_csv_path, mode="w" if csv_header else "a", header=csv_header, index=False)
     return parquet_writer, False
 
 
@@ -351,17 +348,23 @@ def preprocess_master_table(
     input_path: Path = MASTER_PARQUET,
     *,
     batch_size: int = DEFAULT_BATCH_SIZE,
+    output_parquet_path: Path = MODEL_READY_PARQUET,
+    output_csv_path: Path = MODEL_READY_CSV,
+    expected_model_columns: list[str] | None = None,
 ) -> dict[str, Any]:
     """Build the full model-ready dataset and return preprocessing validation metrics."""
-    category_levels = infer_category_levels(input_path, batch_size=batch_size)
-    expected_model_columns = get_expected_model_columns(category_levels)
-    batch_iter = iter_master_batches(input_path, batch_size=batch_size)
-    validation_state = initialize_validation_state(expected_model_columns)
+    output_parquet_path = Path(output_parquet_path)
+    output_csv_path = Path(output_csv_path)
 
-    if MODEL_READY_PARQUET.exists():
-        MODEL_READY_PARQUET.unlink()
-    if MODEL_READY_CSV.exists():
-        MODEL_READY_CSV.unlink()
+    category_levels = infer_category_levels(input_path, batch_size=batch_size)
+    resolved_expected_model_columns = expected_model_columns or get_expected_model_columns(category_levels)
+    batch_iter = iter_master_batches(input_path, batch_size=batch_size)
+    validation_state = initialize_validation_state(resolved_expected_model_columns)
+
+    if output_parquet_path.exists():
+        output_parquet_path.unlink()
+    if output_csv_path.exists():
+        output_csv_path.unlink()
 
     parquet_writer: pq.ParquetWriter | None = None
     csv_header = True
@@ -375,10 +378,16 @@ def preprocess_master_table(
         master_batch = validate_and_cast_master_batch(master_batch)
         master_batch = handle_missing_data(master_batch)
         master_batch = apply_category_dtypes(master_batch, category_levels)
-        model_batch = build_model_input_batch(master_batch, expected_model_columns)
-        validate_model_batch(model_batch, expected_model_columns)
-        update_validation_state(validation_state, model_batch, expected_model_columns)
-        parquet_writer, csv_header = write_model_batch(model_batch, parquet_writer, csv_header=csv_header)
+        model_batch = build_model_input_batch(master_batch, resolved_expected_model_columns)
+        validate_model_batch(model_batch, resolved_expected_model_columns)
+        update_validation_state(validation_state, model_batch, resolved_expected_model_columns)
+        parquet_writer, csv_header = write_model_batch(
+            model_batch,
+            parquet_writer,
+            csv_header=csv_header,
+            output_parquet_path=output_parquet_path,
+            output_csv_path=output_csv_path,
+        )
 
         del batch, master_batch, model_batch
         gc.collect()
@@ -387,7 +396,7 @@ def preprocess_master_table(
         parquet_writer.close()
     gc.collect()
 
-    return finalize_validation_state(validation_state, expected_model_columns)
+    return finalize_validation_state(validation_state, resolved_expected_model_columns)
 
 
 def parse_args() -> argparse.Namespace:
