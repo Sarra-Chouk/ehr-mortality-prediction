@@ -29,6 +29,12 @@ dist/
 
 # Generated artifacts, except for the final XGBoost artifact bundle kept for review/deployment
 /artifacts/*
+!/artifacts/eda_visualizations/
+!/artifacts/eda_visualizations/**
+!/artifacts/bias_analysis_visualizations/
+!/artifacts/bias_analysis_visualizations/**
+!/artifacts/shap_visualizations/
+!/artifacts/shap_visualizations/**
 !/artifacts/xgboost/
 /artifacts/xgboost/*
 !/artifacts/xgboost/xgb_model.joblib
